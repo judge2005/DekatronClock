@@ -56,6 +56,7 @@ struct Stepper {
  */
 struct PinSet {
 	byte *pins;
+	int *lingers;
 	int numPins;
 	int pinIdx;
 	byte currPin;
@@ -68,6 +69,7 @@ struct PinSet {
 
 	PinSet(int numPins, Stepper &stepper) :
 		pins(new byte(numPins)),
+		lingers(new int(numPins)),
 		numPins(numPins),
 		pinIdx(0),
 		currPin(0),
@@ -79,6 +81,7 @@ struct PinSet {
 	{
 		for (int i=0; i<numPins; i++) {
 			pins[i] = 0;
+			lingers[i] = 7000;
 		}
 	}
 
@@ -118,7 +121,7 @@ struct PinSet {
 		}
 
 		// Switch between 'hands' every 7000us - seems like the slowest time with no flicker
-		if (now - lastMove >= 7000) {
+		if (now - lastMove >= lingers[pinIdx]) {
 			lastMove = now;
 			pinIdx = (pinIdx + 1) % numPins;
 			moveTo = pins[pinIdx];
@@ -133,6 +136,15 @@ struct PinSet {
 			this->pins[i] = pins[i];
 		}
 	}
+
+	/**
+	 * Set how long each pin will be lit
+	 */
+	void setLingers(int *lingers) {
+		for (int i=0; i<numPins; i++) {
+			this->lingers[i] = lingers[i];
+		}
+	}
 };
 
 /**
@@ -145,7 +157,15 @@ struct Clock {
 	unsigned long lastSec;
 	unsigned long seconds;
 
-	Clock() : pinSet(3, stepper), lastSec(0), seconds(0) {}
+	Clock() : pinSet(3, stepper), lastSec(0), seconds(0) {
+		int lingers[] = {
+				12000,
+				3500,
+				3500
+		};
+
+		pinSet.setLingers(lingers);
+	}
 
 	/**
 	 * Set the time in seconds. It should be the number of seconds since midnight,
@@ -168,9 +188,9 @@ struct Clock {
 			seconds++;
 			byte pins[3];
 
-			pins[2] = (seconds % 60) / 2;	// Location of seconds hand
-			pins[1] = ((seconds / 60) % 60) / 2; // Location of minutes hand
 			pins[0] = ((seconds / 60 / 12) % 60) / 2; // Location of hours hand
+			pins[1] = ((seconds / 60) % 60) / 2; // Location of minutes hand
+			pins[2] = (seconds % 60) / 2;	// Location of seconds hand
 
 			pinSet.setPins(pins);
 		}
