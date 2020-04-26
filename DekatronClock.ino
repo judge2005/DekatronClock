@@ -1,4 +1,9 @@
+#define USE_RTC
 #include <Arduino.h>
+#ifdef USE_RTC
+#include "RTCLib.h"
+#endif
+#include "EEPROM.h"
 
 #define LED_PIN 13         // Test LED
 #define GUIDE_1_PIN 5       // Guide 1 - G1 pin of 2-guide Dekatron
@@ -304,6 +309,7 @@ struct AnimatedClock {
 		pulseBoth,
 		pulseClockwise,
 		pulseAnticlockwise,
+		noSeconds,
 		SIZE
 	};
 
@@ -359,6 +365,16 @@ struct AnimatedClock {
 		mode = (Mode)((((int)mode)+1) % Mode::SIZE);
 	}
 
+	void setMode(byte mode) {
+		if (mode < Mode::SIZE) {
+			this->mode = (Mode) mode;
+		}
+	}
+
+	byte getMode() {
+		return (byte)mode;
+	}
+
 	/**
 	 * Should be called periodically with the current number of microseconds
 	 */
@@ -366,7 +382,7 @@ struct AnimatedClock {
 		pinSet.periodic(now);
 
 		if (now - lastPulse >= 100000) {
-			int numPins = 3;
+			int numPins = 2;
 			lastPulse = now;
 
 			if (now - lastSec >= 1000000) {
@@ -377,61 +393,65 @@ struct AnimatedClock {
 			byte pins[3 + 6];
 
 			pins[0] = ((seconds / 60 / 12) % 60) / 2; // Location of hours hand
-			pins[1] = (seconds % 60) / 2;	// Location of seconds hand
-			pins[2] = ((seconds / 60) % 60) / 2; // Location of minutes hand
+			pins[1] = ((seconds / 60) % 60) / 2; // Location of minutes hand
 
-			if (mode != plain) {
-				if (mode < pulseBoth) {
-					byte origin = pins[2];
-					byte destination = pins[0];
+			if (mode != noSeconds) {
+				numPins = 3;
+				pins[2] = (seconds % 60) / 2;	// Location of seconds hand
 
-					char clockwiseDistance = destination - origin;
-					if (clockwiseDistance < 0) {
-						clockwiseDistance = 30 + clockwiseDistance;
-					}
+				if (mode != plain) {
+					if (mode < pulseBoth) {
+						byte origin = pins[1];
+						byte destination = pins[0];
 
-					for (int i=0; i<6; i++) {
-						byte distance = i * 5 + 1 + inc;
+						char clockwiseDistance = destination - origin;
+						if (clockwiseDistance < 0) {
+							clockwiseDistance = 30 + clockwiseDistance;
+						}
+
+						for (int i=0; i<6; i++) {
+							byte distance = i * 5 + 1 + inc;
+							if (distance <= clockwiseDistance) {
+								if (mode == trainBoth || mode == trainClockwise) {
+									pins[numPins++] = (origin + distance) % 30;
+								}
+							} else {
+								if (mode == trainBoth || mode == trainAnticlockwise) {
+									pins[numPins++] = (30 + origin - (5 - i) * 5 - 1 - inc) % 30;
+								}
+							}
+						}
+
+						inc = (inc + 1) % 5;
+					} else {
+						byte origin = pins[1];
+						byte destination = pins[0];
+
+						char clockwiseDistance = destination - origin;
+						if (clockwiseDistance < 0) {
+							clockwiseDistance = 30 + clockwiseDistance;
+						}
+
+						char antiClockwiseDistance = origin - destination;
+						if (antiClockwiseDistance < 0) {
+							antiClockwiseDistance = 30 + antiClockwiseDistance;
+						}
+
+						byte distance = inc + 1;
 						if (distance <= clockwiseDistance) {
-							if (mode == trainBoth || mode == trainClockwise) {
+							if (mode == pulseBoth || mode == pulseClockwise) {
 								pins[numPins++] = (origin + distance) % 30;
 							}
-						} else {
-							if (mode == trainBoth || mode == trainAnticlockwise) {
-								pins[numPins++] = (30 + origin - (5 - i) * 5 - 1 - inc) % 30;
+						}
+
+						if (distance <= antiClockwiseDistance){
+							if (mode == pulseBoth || mode == pulseAnticlockwise) {
+								pins[numPins++] = (30 + origin - distance) % 30;
 							}
 						}
+
+						inc = (inc + 1) % 30;
 					}
-
-					inc = (inc + 1) % 5;
-				} else {
-					byte origin = pins[2];
-					byte destination = pins[0];
-
-					char clockwiseDistance = destination - origin;
-					if (clockwiseDistance < 0) {
-						clockwiseDistance = 30 + clockwiseDistance;
-					}
-
-					char antiClockwiseDistance = origin - destination;
-					if (antiClockwiseDistance < 0) {
-						antiClockwiseDistance = 30 + antiClockwiseDistance;
-					}
-
-					byte distance = inc + 1;
-					if (distance <= clockwiseDistance) {
-						if (mode == pulseBoth || mode == pulseClockwise) {
-							pins[numPins++] = (origin + distance) % 30;
-						}
-					}
-
-					if (distance <= antiClockwiseDistance){
-						if (mode == pulseBoth || mode == pulseAnticlockwise) {
-							pins[numPins++] = (30 + origin - distance) % 30;
-						}
-					}
-
-					inc = (inc + 1) % 30;
 				}
 			}
 
@@ -444,8 +464,46 @@ AnimatedClock clock;
 Button button(pinButton);
 RotaryEncoder encoder(encoderA, encoderB);
 
+#ifdef USE_RTC
+RTC_DS3231 rtc;
+#endif
+bool rtcPresent = false;
+unsigned long lastSetTime;
+const unsigned long MILLIS_IN_DAY = 24 * 60L * 60L * 1000L;
+
+void setFromRTC() {
+	if (rtcPresent) {
+#ifdef USE_RTC
+		DateTime time = rtc.now();
+
+		Serial.print(time.hour());
+		Serial.print(":");
+		Serial.print(time.minute());
+		Serial.print(":");
+		Serial.println(time.second());
+
+		clock.set((time.hour() % 12) * 60L * 60L + time.minute() * 60L + time.second());
+#endif
+	}
+}
+
+void setRTC() {
+	if (rtcPresent) {
+#ifdef USE_RTC
+		int hour = (clock.seconds / 3600) % 24;
+		int min = (clock.seconds / 60) % 60;
+		int sec = clock.seconds % 60;
+		DateTime newTime(2000, 1, 1, hour, min, sec);
+
+		rtc.adjust(DateTime(2000, 1, 1, hour, min, sec));
+#endif
+	}
+}
+
 // setup() runs once, at reset, to initialize system
 void setup() {
+	Serial.begin(9600);
+
 	pinMode(GUIDE_1_PIN, OUTPUT);
 	pinMode(GUIDE_2_PIN, OUTPUT);
 	pinMode(INDEX_PIN, INPUT);
@@ -455,25 +513,49 @@ void setup() {
 	pinMode(encoderA, INPUT_PULLUP);
 	pinMode(encoderB, INPUT_PULLUP);
 
+	byte mode = EEPROM.read(0);
+	if (mode >= AnimatedClock::Mode::SIZE) {
+		EEPROM.write(0, clock.getMode());
+	}
+
+	clock.setMode(EEPROM.read(0));
+
 	// Set to 08:20. Because why not?
 	clock.set(8L * 60L * 60L + 20L * 60L);
+
+	// If we have an RTC, use that instead
+#ifdef USE_RTC
+	rtcPresent = rtc.begin();
+#endif
+	Serial.print("RTC Present: ");
+	Serial.println(rtcPresent);
+
+	setFromRTC();
 }
 
 void loop() {
+	if (millis() - lastSetTime >= MILLIS_IN_DAY) {
+		lastSetTime = millis();
+		setFromRTC();
+	}
+
 	unsigned long now = micros();
 
 	clock.periodic(now);
 
 	if (button.clicked()) {
 		clock.incrementMode();
+		EEPROM.write(0, clock.getMode());
 	}
 
 	int rotation = encoder.getRotation();
 	if (rotation > 0) {
 		clock.incrementMinutes();
+		setRTC();
 	}
 
 	if (rotation < 0) {
 		clock.decrementMinutes();
+		setRTC();
 	}
 }
