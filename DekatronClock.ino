@@ -392,12 +392,12 @@ struct AnimatedClock {
 
 			byte pins[3 + 6];
 
-			pins[0] = ((seconds / 60 / 12) % 60) / 2; // Location of hours hand
-			pins[1] = ((seconds / 60) % 60) / 2; // Location of minutes hand
+			pins[0] = ((seconds / 60 / 12 + 20) % 60) / 2; // Location of hours hand
+			pins[1] = ((seconds / 60 + 20) % 60) / 2; // Location of minutes hand
 
 			if (mode != noSeconds) {
 				numPins = 3;
-				pins[2] = (seconds % 60) / 2;	// Location of seconds hand
+				pins[2] = ((seconds + 20) % 60) / 2;	// Location of seconds hand
 
 				if (mode != plain) {
 					if (mode < pulseBoth) {
