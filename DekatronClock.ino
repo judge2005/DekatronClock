@@ -469,7 +469,7 @@ RTC_DS3231 rtc;
 #endif
 bool rtcPresent = false;
 unsigned long lastSetTime;
-const unsigned long MILLIS_IN_DAY = 24 * 60L * 60L * 1000L;
+const unsigned long SET_PERIOD = 5L * 60L * 1000L;	// Every 5 minutes
 
 void setFromRTC() {
 	if (rtcPresent) {
@@ -493,9 +493,15 @@ void setRTC() {
 		int hour = (clock.seconds / 3600) % 24;
 		int min = (clock.seconds / 60) % 60;
 		int sec = clock.seconds % 60;
-		DateTime newTime(2000, 1, 1, hour, min, sec);
+		DateTime time(2000, 1, 1, hour, min, sec);
 
-		rtc.adjust(DateTime(2000, 1, 1, hour, min, sec));
+		Serial.print(time.hour());
+		Serial.print(":");
+		Serial.print(time.minute());
+		Serial.print(":");
+		Serial.println(time.second());
+
+		rtc.adjust(time);
 #endif
 	}
 }
@@ -534,7 +540,7 @@ void setup() {
 }
 
 void loop() {
-	if (millis() - lastSetTime >= MILLIS_IN_DAY) {
+	if (millis() - lastSetTime >= SET_PERIOD) {
 		lastSetTime = millis();
 		setFromRTC();
 	}
